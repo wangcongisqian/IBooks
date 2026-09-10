@@ -1,7 +1,7 @@
 <idea-plugin>
     <id>com.ibooks.plugin</id>
     <name>IBooks</name>
-    <vendor email="ibooks@local" url="https://github.com/ibooks">IBooks</vendor>
+    <vendor email="alen.mark.wang@gmail.com" url="https://github.com/wangcongisqian/IBooks">IBooks</vendor>
 
     <description><![CDATA[
         <p><b>IBooks</b> is an EPUB reader and generator that lives inside IntelliJ IDEA.</p>
