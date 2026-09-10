@@ -1,0 +1,114 @@
+<idea-plugin>
+    <id>com.ibooks.plugin</id>
+    <name>IBooks</name>
+    <vendor email="ibooks@local" url="https://github.com/ibooks">IBooks</vendor>
+
+    <description><![CDATA[
+        <p><b>IBooks</b> is an EPUB reader and generator that lives inside IntelliJ IDEA.</p>
+        <p>Powered by <code>epublib-core</code>, it opens EPUB 2/3 books in a dedicated tool window,
+        renders chapters with a paper / linen / night / ink theme, keeps reading progress and bookmarks,
+        and can compile HTML or Markdown files from your project into a new EPUB.</p>
+        <ul>
+            <li>Open <code>.epub</code> from disk or drag onto the tool window</li>
+            <li>Cover, metadata, nested table of contents, spine-ordered chapters</li>
+            <li>Bookmarks, search in chapter, font size, reading themes</li>
+            <li>Library of recently opened books with resume-at-last-position</li>
+            <li>Generate EPUB from selected files via <em>Tools → IBooks → Create EPUB</em></li>
+        </ul>
+    ]]></description>
+
+    <change-notes><![CDATA[
+        <h3>1.0.0</h3>
+        <ul>
+            <li>First release: reader, library, bookmarks, progress, EPUB generator</li>
+            <li>epublib-core 3.1 for parse and write</li>
+            <li>Chinese and English UI bundles</li>
+        </ul>
+    ]]></change-notes>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.lang</depends>
+
+    <resource-bundle>messages.IBooksBundle</resource-bundle>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <toolWindow id="IBooks"
+                    anchor="right"
+                    secondary="false"
+                    icon="com.ibooks.IBooksIcons.ToolWindow"
+                    factoryClass="com.ibooks.IBooksToolWindowFactory"
+                    canCloseContents="false"/>
+
+        <applicationConfigurable parentId="tools"
+                                 instance="com.ibooks.settings.IBooksConfigurable"
+                                 id="com.ibooks.settings"
+                                 displayName="IBooks"/>
+
+        <notificationGroup id="IBooks" displayType="BALLOON" key="notification.group"/>
+
+        <requiredForSmartModeStartupActivity implementation="com.ibooks.IBooksStartupActivity"/>
+    </extensions>
+
+    <actions>
+        <group id="IBooks.Menu"
+               text="IBooks"
+               description="IBooks EPUB reader"
+               popup="false">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+
+            <action id="IBooks.OpenEpub"
+                    class="com.ibooks.actions.OpenEpubAction"
+                    text="Open EPUB..."
+                    description="Open an EPUB book in IBooks">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt O"/>
+                <keyboard-shortcut keymap="Mac OS X" first-keystroke="meta alt O"/>
+                <keyboard-shortcut keymap="Mac OS X 10.5+" first-keystroke="meta alt O"/>
+            </action>
+
+            <action id="IBooks.ShowWindow"
+                    class="com.ibooks.actions.ShowIBooksAction"
+                    text="Show IBooks"
+                    description="Open the IBooks tool window"/>
+
+            <separator/>
+
+            <action id="IBooks.CreateEpub"
+                    class="com.ibooks.actions.CreateEpubAction"
+                    text="Create EPUB from Files..."
+                    description="Pack selected HTML or Markdown files into an EPUB with epublib-core"/>
+
+            <separator/>
+
+            <action id="IBooks.PrevChapter"
+                    class="com.ibooks.actions.PrevChapterAction"
+                    text="Previous Chapter"
+                    description="Go to the previous chapter">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt LEFT"/>
+            </action>
+            <action id="IBooks.NextChapter"
+                    class="com.ibooks.actions.NextChapterAction"
+                    text="Next Chapter"
+                    description="Go to the next chapter">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt RIGHT"/>
+            </action>
+            <action id="IBooks.Bookmark"
+                    class="com.ibooks.actions.BookmarkCurrentAction"
+                    text="Bookmark Current Position"
+                    description="Bookmark the current chapter">
+                <keyboard-shortcut keymap="$default" first-keystroke="ctrl alt B"/>
+            </action>
+            <action id="IBooks.IncreaseFont"
+                    class="com.ibooks.actions.IncreaseFontAction"
+                    text="Increase Font Size"/>
+            <action id="IBooks.DecreaseFont"
+                    class="com.ibooks.actions.DecreaseFontAction"
+                    text="Decrease Font Size"/>
+            <action id="IBooks.ToggleTheme"
+                    class="com.ibooks.actions.ToggleThemeAction"
+                    text="Cycle Reading Theme"/>
+            <!--<action id="IBooks.ExportNotes"
+                    class="com.ibooks.actions.ExportNotesAction"
+                    text="Export Bookmarks..."/>-->
+        </group>
+    </actions>
+</idea-plugin>

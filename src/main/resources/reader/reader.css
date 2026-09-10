@@ -1,0 +1,40 @@
+html, body {
+    margin: 0;
+    padding: 0;
+}
+body.ibooks-body {
+    font-family: "Georgia", "Times New Roman", serif;
+    font-size: 17px;
+    line-height: 1.7;
+    max-width: 42em;
+    margin: 0 auto;
+    padding: 28px 32px 64px;
+    color: #1c1916;
+    background: #f3eee6;
+}
+body.ibooks-body.theme-linen {
+    background: #e8dcc8;
+    color: #2a2118;
+}
+body.ibooks-body.theme-night {
+    background: #1c1916;
+    color: #e8e0d4;
+}
+body.ibooks-body.theme-ink {
+    background: #0c0b0a;
+    color: #c8c0b4;
+}
+h1, h2, h3, h4 {
+    font-weight: 600;
+    line-height: 1.25;
+    margin: 1.4em 0 0.6em;
+}
+p { margin: 0 0 0.9em; }
+img { max-width: 100%; height: auto; }
+a { color: inherit; }
+blockquote {
+    margin: 1em 0;
+    padding-left: 1em;
+    border-left: 2px solid currentColor;
+    opacity: 0.85;
+}
