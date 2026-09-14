@@ -2,10 +2,13 @@ package com.ibooks.ui;
 
 import com.ibooks.IBooksBundle;
 import com.ibooks.IBooksNotifier;
+import com.ibooks.domain.Bookmark;
 import com.ibooks.domain.Chapter;
+import com.ibooks.domain.LibraryBook;
 import com.ibooks.domain.ParsedBook;
 import com.ibooks.domain.ReadingProgress;
 import com.ibooks.epub.EpubService;
+import com.ibooks.pdf.PdfService;
 import com.ibooks.service.BookmarkService;
 import com.ibooks.service.LibraryService;
 import com.ibooks.service.ProgressService;
@@ -30,20 +33,17 @@ import com.intellij.openapi.wm.ToolWindow;
 import com.intellij.ui.JBSplitter;
 import com.intellij.ui.SearchTextField;
 import com.intellij.ui.components.JBLabel;
+import com.intellij.ui.components.JBList;
 import com.intellij.ui.components.JBPanel;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
-import javax.swing.Icon;
-import javax.swing.JButton;
-import javax.swing.JComponent;
-import javax.swing.JPanel;
-import javax.swing.SwingUtilities;
-import javax.swing.TransferHandler;
+import javax.swing.*;
 import java.awt.BorderLayout;
 import java.awt.CardLayout;
+import java.awt.Component;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -114,7 +114,7 @@ public final class IBooksToolWindow implements Disposable {
     /**
      * 工具栏宿主面板
      */
-    private JPanel toolbarHost;
+    private final JPanel toolbarHost;
 
     /**
      * 当前打开的书籍
@@ -201,7 +201,9 @@ public final class IBooksToolWindow implements Disposable {
     public void openEpubDialog() {
         FileChooserDescriptor descriptor = new FileChooserDescriptor(true, false, false, false, false, false)
                 .withTitle(IBooksBundle.message("dialog.open.title"))
-                .withFileFilter(file -> "epub".equalsIgnoreCase(file.getExtension()));
+                .withFileFilter(file -> "epub".equalsIgnoreCase(file.getExtension())
+                        || "txt".equalsIgnoreCase(file.getExtension())
+                        || "pdf".equalsIgnoreCase(file.getExtension()));
         VirtualFile file = FileChooser.chooseFile(descriptor, project, null);
         if (file != null) {
             openPath(Path.of(file.getPath()));
@@ -222,7 +224,12 @@ public final class IBooksToolWindow implements Disposable {
             public void run(@NotNull ProgressIndicator indicator) {
                 indicator.setIndeterminate(true);
                 try {
-                    parsed = EpubService.getInstance().open(path);
+                    String lower = path.getFileName().toString().toLowerCase();
+                    if (lower.endsWith(".pdf")) {
+                        parsed = PdfService.getInstance().open(path);
+                    } else {
+                        parsed = EpubService.getInstance().open(path);
+                    }
                 } catch (IOException e) {
                     error = e;
                 }
@@ -236,18 +243,15 @@ public final class IBooksToolWindow implements Disposable {
                     return;
                 }
                 current = parsed;
-                ReadingProgress progress = ProgressService.getInstance().get(parsed.id);
+                ReadingProgress progress = resolveProgress(parsed);
                 chapterIndex = progress == null
                         ? 0
                         : Math.min(progress.chapterIndex, parsed.chapters.size() - 1);
                 tocTree.setBook(parsed);
-                showChapter(chapterIndex);
+                showChapter(chapterIndex, progress == null ? null : progress.scrollOffset);
                 cards.show(cardHost, "reader");
                 LibraryService.getInstance().remember(parsed, chapterIndex, percent());
                 libraryPanel.reload();
-                if (progress != null) {
-                    chapterView.setScrollOffset(progress.scrollOffset);
-                }
             }
         });
     }
@@ -287,8 +291,7 @@ public final class IBooksToolWindow implements Disposable {
      */
     public void bumpFont(int delta) {
         IBooksSettings.getInstance().bumpFont(delta);
-        chapterView.applyTheme();
-        refreshChapter();
+        chapterView.applyStyles();
     }
 
     /**
@@ -296,8 +299,7 @@ public final class IBooksToolWindow implements Disposable {
      */
     public void cycleTheme() {
         IBooksSettings.getInstance().cycleTheme();
-        chapterView.applyTheme();
-        refreshChapter();
+        chapterView.applyStyles();
     }
 
     /**
@@ -325,13 +327,17 @@ public final class IBooksToolWindow implements Disposable {
      * @param index 要显示的章节索引
      */
     private void showChapter(int index) {
+        showChapter(index, null);
+    }
+
+    private void showChapter(int index, Integer restoreScrollOffset) {
         if (current == null || index < 0 || index >= current.chapters.size()) {
             return;
         }
         persistProgress();
         chapterIndex = index;
         Chapter chapter = current.chapters.get(index);
-        chapterView.showChapter(chapter);
+        chapterView.showChapter(chapter, restoreScrollOffset);
         status.setText(current.title + "  ·  "
                 + IBooksBundle.message("reader.chapter", index + 1, current.chapters.size())
                 + "  ·  " + chapter.title);
@@ -375,6 +381,19 @@ public final class IBooksToolWindow implements Disposable {
             return 0;
         }
         return Math.round((chapterIndex + 1) * 100f / current.chapters.size());
+    }
+
+    private @Nullable ReadingProgress resolveProgress(@NotNull ParsedBook book) {
+        ReadingProgress serviceProgress = ProgressService.getInstance().get(book.id);
+        if (serviceProgress != null) {
+            return serviceProgress;
+        }
+        for (LibraryBook libraryBook : LibraryService.getInstance().books()) {
+            if (libraryBook.id.equals(book.id) || book.source.toString().equals(libraryBook.path)) {
+                return new ReadingProgress(book.id, Math.max(0, libraryBook.lastChapterIndex), 0);
+            }
+        }
+        return null;
     }
 
     /**
@@ -501,25 +520,130 @@ public final class IBooksToolWindow implements Disposable {
         // 顶部工具栏：放【目录弹出按钮】
         JPanel toolBarPanel = new JPanel(new FlowLayout(FlowLayout.LEFT,4,2));
 
-        JButton tocBtn = new JButton();//"▤"
-        tocBtn.setToolTipText(IBooksBundle.message("toolwindow.catalogue"));
-        tocBtn.setIcon(AllIcons.Actions.Minimap);
+        JButton tocBtn = iconButton(IBooksBundle.message("toolwindow.catalogue"), AllIcons.Actions.Minimap, null);//"▤"
 
         tocBtn.addActionListener(e -> showTocPopup(tocBtn));
         toolBarPanel.add(tocBtn);
         // 顶部工具栏：放【下一章】 【上一章】 【字体大小】 【主题】 【书签】
         toolBarPanel.add(iconButton(IBooksBundle.message("action.prev"), AllIcons.Actions.Back, this::prevChapter));
         toolBarPanel.add(iconButton(IBooksBundle.message("action.next"), AllIcons.Actions.Forward, this::nextChapter));
-//        toolBarPanel.add(iconButton(IBooksBundle.message("toolwindow.font.minus"), AllIcons.General.Remove, () -> bumpFont(-1)));
-//        toolBarPanel.add(iconButton(IBooksBundle.message("toolwindow.font.plus"), AllIcons.General.Add, () -> bumpFont(1)));
-//        toolBarPanel.add(iconButton(IBooksBundle.message("toolwindow.theme"), AllIcons.Actions.IntentionBulb, this::cycleTheme));
-//        toolBarPanel.add(iconButton(IBooksBundle.message("action.bookmark"), AllIcons.Actions.Checked, this::bookmarkCurrent));
+        toolBarPanel.add(iconButton(IBooksBundle.message("toolwindow.font.minus"), AllIcons.General.Remove, () -> bumpFont(-1)));
+        toolBarPanel.add(iconButton(IBooksBundle.message("toolwindow.font.plus"), AllIcons.General.Add, () -> bumpFont(1)));
+        toolBarPanel.add(iconButton(IBooksBundle.message("toolwindow.theme"), AllIcons.Actions.IntentionBulb, this::cycleTheme));
+        JButton readModeBtn = iconButton("Read mode", AllIcons.Actions.Preview, () -> {
+            if (current == null) {
+                return;
+            }
+            chapterView.setReadMode(!chapterView.isReadMode());
+            if (chapterView.isReadMode()) {
+                chapterView.showChapter(current.chapters.get(chapterIndex));
+            }
+        });
+        toolBarPanel.add(readModeBtn);
+        toolBarPanel.add(iconButton(IBooksBundle.message("action.bookmark"), AllIcons.Actions.Checked, this::bookmarkCurrent));
+
+        //书签列表
+        JButton bookmarkBtn = iconButton(IBooksBundle.message("action.bookmark.list"), AllIcons.Toolwindows.ToolWindowFind, null);
+        bookmarkBtn.addActionListener(e -> showBookmarksPopup(bookmarkBtn));
+        toolBarPanel.add(bookmarkBtn);
 
         mainPanel.add(toolBarPanel, BorderLayout.NORTH);
         // 主体只放阅读章节内容
         mainPanel.add(chapterView, BorderLayout.CENTER);
 
         return mainPanel;
+    }
+
+    private void showBookmarksPopup(JComponent triggerComponent) {
+        if (current == null) {
+            return;
+        }
+        List<Bookmark> bookmarks = BookmarkService.getInstance().forBook(current.id);
+        if (bookmarks.isEmpty()) {
+            IBooksNotifier.info(project, IBooksBundle.message("bookmark.empty"));
+            return;
+        }
+
+        DefaultListModel<Bookmark> model = new DefaultListModel<>();
+        bookmarks.forEach(model::addElement);
+
+        JBList<Bookmark> list = new JBList<>(model);
+        list.setCellRenderer(new DefaultListCellRenderer() {
+            @Override
+            public Component getListCellRendererComponent(JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus) {
+                JPanel panel = new JPanel(new BorderLayout());
+                panel.setBorder(JBUI.Borders.empty(6, 8));
+                panel.setOpaque(true);
+                panel.setBackground(isSelected ? list.getSelectionBackground() : list.getBackground());
+                Bookmark bookmark = (Bookmark) value;
+                JBLabel title = new JBLabel(bookmark.chapterTitle.isBlank() ? "Chapter " + (bookmark.chapterIndex + 1) : bookmark.chapterTitle);
+                title.setForeground(isSelected ? list.getSelectionForeground() : list.getForeground());
+                title.setFont(title.getFont().deriveFont(Font.BOLD, 12f));
+                JBLabel meta = new JBLabel(bookmark.note == null || bookmark.note.isBlank() ? IBooksBundle.message("bookmark.goto") : bookmark.note);
+                meta.setForeground(isSelected ? list.getSelectionForeground() : JBUI.CurrentTheme.Label.disabledForeground());
+                panel.add(title, BorderLayout.NORTH);
+                panel.add(meta, BorderLayout.SOUTH);
+                return panel;
+            }
+        });
+
+        list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        list.addListSelectionListener(e -> {
+            if (!e.getValueIsAdjusting()) {
+                Bookmark selected = list.getSelectedValue();
+                if (selected != null) {
+                    showChapter(selected.chapterIndex);
+                    if (selected.chapterIndex == chapterIndex) {
+                        chapterView.setScrollOffset(0);
+                    }
+                }
+            }
+        });
+        list.getInputMap().put(KeyStroke.getKeyStroke("DELETE"), "removeBookmark");
+        list.getActionMap().put("removeBookmark", new AbstractAction() {
+            @Override
+            public void actionPerformed(java.awt.event.ActionEvent e) {
+                Bookmark selected = list.getSelectedValue();
+                if (selected == null) {
+                    return;
+                }
+                BookmarkService.getInstance().remove(selected);
+                model.removeElement(selected);
+                if (model.isEmpty()) {
+                    IBooksNotifier.info(project, IBooksBundle.message("bookmark.empty"));
+                }
+            }
+        });
+
+        JPanel content = new JPanel(new BorderLayout());
+        content.add(new JBScrollPane(list), BorderLayout.CENTER);
+
+        JButton removeBtn = new JButton(IBooksBundle.message("bookmark.remove"));
+        removeBtn.addActionListener(e -> {
+            Bookmark selected = list.getSelectedValue();
+            if (selected == null) {
+                return;
+            }
+            BookmarkService.getInstance().remove(selected);
+            model.removeElement(selected);
+            if (model.isEmpty()) {
+                IBooksNotifier.info(project, IBooksBundle.message("bookmark.empty"));
+            }
+        });
+
+        JPanel footer = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        footer.add(removeBtn);
+        content.add(footer, BorderLayout.SOUTH);
+
+        JBPopup popup = JBPopupFactory.getInstance()
+                .createComponentPopupBuilder(content, list)
+                .setTitle(IBooksBundle.message("action.bookmark"))
+                .setResizable(true)
+                .setMovable(true)
+                .setCancelOnClickOutside(true)
+                .setRequestFocus(true)
+                .createPopup();
+        popup.showUnderneathOf(triggerComponent);
     }
 
     /**
@@ -563,7 +687,9 @@ public final class IBooksToolWindow implements Disposable {
                     List<File> files = (List<File>) event.getTransferable()
                             .getTransferData(DataFlavor.javaFileListFlavor);
                     files.stream()
-                            .filter(f -> f.getName().toLowerCase().endsWith(".epub"))
+                            .filter(f -> f.getName().toLowerCase().endsWith(".epub")
+                                    || f.getName().toLowerCase().endsWith(".txt")
+                                    || f.getName().toLowerCase().endsWith(".pdf"))
                             .findFirst()
                             .ifPresent(f -> SwingUtilities.invokeLater(() -> openPath(f.toPath())));
                     event.dropComplete(true);

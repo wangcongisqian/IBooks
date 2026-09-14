@@ -33,6 +33,33 @@ public final class EpubParser {
     private EpubParser() {
     }
 
+    public static @NotNull ParsedBook parseText(@NotNull Path textFile, @NotNull Path cacheRoot) throws IOException {
+        if (!Files.isRegularFile(textFile)) {
+            throw new IOException("Not a file: " + textFile);
+        }
+        String id = hashPath(textFile);
+        Path extracted = cacheRoot.resolve(id);
+        Files.createDirectories(extracted);
+
+        byte[] bytes = Files.readAllBytes(textFile);
+        String text = new String(bytes, detectCharset(bytes));
+        String clean = text.replace("\r\n", "\n").replace('\r', '\n');
+        String title = textFile.getFileName().toString();
+        int dotIndex = title.lastIndexOf('.');
+        if (dotIndex > 0) {
+            title = title.substring(0, dotIndex);
+        }
+        String firstLine = clean.lines().filter(line -> !line.isBlank()).findFirst().orElse(title);
+        if (firstLine.length() <= 80) {
+            title = firstLine.strip();
+        }
+
+        String html = buildPlainTextHtml(clean);
+        Chapter chapter = new Chapter(0, title, "chapter-0", extracted.resolve("chapter-0.txt"), html);
+        List<TocNode> toc = List.of(new TocNode(title, chapter.href));
+        return new ParsedBook(id, textFile, title, "Unknown author", "en", "", null, null, List.of(chapter), toc, extracted);
+    }
+
     public static @NotNull ParsedBook parse(@NotNull Path epubFile, @NotNull Path cacheRoot) throws IOException {
         if (!Files.isRegularFile(epubFile)) {
             throw new IOException("Not a file: " + epubFile);
@@ -181,6 +208,42 @@ public final class EpubParser {
         String first = author.getFirstname() == null ? "" : author.getFirstname().trim();
         String last = author.getLastname() == null ? "" : author.getLastname().trim();
         return (first + " " + last).trim();
+    }
+
+    private static String buildPlainTextHtml(String text) {
+        String normalized = text.replace("\r\n", "\n").replace('\r', '\n');
+        String[] paragraphs = normalized.split("\\n\\s*\\n");
+        StringBuilder html = new StringBuilder();
+        html.append("<html><body>");
+        for (String paragraph : paragraphs) {
+            String safe = paragraph.replace("&", "&amp;")
+                    .replace("<", "&lt;")
+                    .replace(">", "&gt;")
+                    .replace("\"", "&quot;");
+            safe = safe.replace("\n", "<br>");
+            html.append("<p>").append(safe).append("</p>");
+        }
+        if (paragraphs.length == 0 || paragraphs[0].isBlank()) {
+            html.append("<p></p>");
+        }
+        html.append("</body></html>");
+        return html.toString();
+    }
+
+    private static java.nio.charset.Charset detectCharset(byte[] bytes) {
+        if (bytes.length >= 3 && bytes[0] == (byte) 0xEF && bytes[1] == (byte) 0xBB && bytes[2] == (byte) 0xBF) {
+            return StandardCharsets.UTF_8;
+        }
+        if (bytes.length >= 2 && bytes[0] == (byte) 0xFF && bytes[1] == (byte) 0xFE) {
+            return StandardCharsets.UTF_16LE;
+        }
+        if (bytes.length >= 2 && bytes[0] == (byte) 0xFE && bytes[1] == (byte) 0xFF) {
+            return StandardCharsets.UTF_16BE;
+        }
+        if (bytes.length >= 2 && (bytes[0] == 0 || bytes[1] == 0)) {
+            return StandardCharsets.UTF_16;
+        }
+        return StandardCharsets.UTF_8;
     }
 
     private static String hashPath(Path path) {

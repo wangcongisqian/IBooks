@@ -10,7 +10,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Makes chapter XHTML self-contained enough for {@link javax.swing.JEditorPane}:
+ * Makes chapter XHTML self-contained enough for {@link javax.swing.JTextPane}:
  * inlines local CSS, rewrites relative image src to absolute file URIs.
  */
 public final class HtmlRewriter {

@@ -18,8 +18,15 @@ public final class EpubService {
         return INSTANCE;
     }
 
-    public @NotNull ParsedBook open(@NotNull Path epubFile) throws IOException {
-        return EpubParser.parse(epubFile, cacheRoot());
+    public @NotNull ParsedBook open(@NotNull Path bookFile) throws IOException {
+        String lower = bookFile.getFileName().toString().toLowerCase();
+        if (lower.endsWith(".txt")) {
+            return EpubParser.parseText(bookFile, cacheRoot());
+        }
+        if (lower.endsWith(".pdf")) {
+            return com.ibooks.pdf.PdfService.getInstance().open(bookFile);
+        }
+        return EpubParser.parse(bookFile, cacheRoot());
     }
 
     public @NotNull Path cacheRoot() throws IOException {

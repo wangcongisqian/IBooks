@@ -19,6 +19,7 @@ import java.util.List;
 public final class LibraryService implements PersistentStateComponent<LibraryService.State> {
     public static final class State {
         public List<LibraryBook> books = new ArrayList<>();
+        public List<String> removedIds = new ArrayList<>();
         public String lastOpenedPath = "";
     }
 
@@ -39,15 +40,26 @@ public final class LibraryService implements PersistentStateComponent<LibrarySer
         if (state.books == null) {
             state.books = new ArrayList<>();
         }
+        if (state.removedIds == null) {
+            state.removedIds = new ArrayList<>();
+        }
     }
 
     public List<LibraryBook> books() {
-        List<LibraryBook> copy = new ArrayList<>(state.books);
+        List<LibraryBook> copy = new ArrayList<>();
+        for (LibraryBook book : state.books) {
+            if (!state.removedIds.contains(book.id)) {
+                copy.add(book);
+            }
+        }
         copy.sort(Comparator.comparingLong((LibraryBook b) -> b.lastOpenedAt).reversed());
         return copy;
     }
 
     public void remember(@NotNull ParsedBook book, int chapterIndex, int percent) {
+        if (state.removedIds.contains(book.id)) {
+            return;
+        }
         LibraryBook row = state.books.stream()
                 .filter(b -> book.id.equals(b.id) || book.source.toString().equals(b.path))
                 .findFirst()
@@ -69,7 +81,18 @@ public final class LibraryService implements PersistentStateComponent<LibrarySer
     }
 
     public void remove(String id) {
+        state.books.stream()
+                .filter(b -> id.equals(b.id))
+                .findFirst()
+                .ifPresent(book -> {
+                    if (state.lastOpenedPath != null && state.lastOpenedPath.equals(book.path)) {
+                        state.lastOpenedPath = "";
+                    }
+                });
         state.books.removeIf(b -> id.equals(b.id));
+        if (id != null && !id.isBlank() && !state.removedIds.contains(id)) {
+            state.removedIds.add(id);
+        }
     }
 
     public @Nullable String getLastOpenedPath() {

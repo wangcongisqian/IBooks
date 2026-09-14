@@ -56,8 +56,8 @@ public final class IBooksStartupActivity implements StartupActivity, DumbAware {
                 window.show(() -> {
                     // 从项目中获取 IBooks 工具窗口面板
                     IBooksToolWindow panel = IBooksToolWindow.from(project);
-                    // 如果面板存在，则打开指定路径的书籍
-                    if (panel != null) {
+                    // 如果面板存在且当前未打开书籍，则打开指定路径的书籍
+                    if (panel != null && panel.currentBook() == null) {
                         panel.openPath(file);
                     }
                 });

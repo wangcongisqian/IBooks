@@ -2,19 +2,28 @@ package com.ibooks.ui;
 
 import com.ibooks.domain.Chapter;
 import com.ibooks.settings.IBooksSettings;
-import com.intellij.openapi.application.ApplicationManager;
 import com.intellij.ui.components.JBScrollPane;
 import com.intellij.util.ui.JBUI;
 import org.jetbrains.annotations.NotNull;
 
 import javax.swing.JEditorPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollBar;
+import javax.swing.JTextPane;
 import javax.swing.SwingUtilities;
 import javax.swing.event.HyperlinkEvent;
+import javax.swing.text.BadLocationException;
+import javax.swing.text.DefaultStyledDocument;
+import javax.swing.text.SimpleAttributeSet;
+import javax.swing.text.StyleConstants;
 import javax.swing.text.html.HTMLDocument;
 import javax.swing.text.html.HTMLEditorKit;
 import javax.swing.text.html.StyleSheet;
 import java.awt.BorderLayout;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Consumer;
 
 /**
@@ -23,11 +32,16 @@ import java.util.function.Consumer;
  */
 public final class ChapterView extends JPanel {
     // 编辑器面板，用于显示HTML内容
-    private final JEditorPane editor = new JEditorPane();
+    private final JTextPane editor = new JTextPane();
     // 滚动面板，包含编辑器组件
     private final JBScrollPane scroll;
     // 链接点击处理器，用于处理章节中的链接点击事件
     private Consumer<String> linkHandler = href -> {};
+    private String currentHtml = "";
+    private boolean readMode = false;
+    private final List<String> readLines = new ArrayList<>();
+    private int readLineIndex = -1;
+    private Integer pendingScrollOffset = null;
 
     /**
      * 构造函数，初始化章节视图组件
@@ -54,6 +68,31 @@ public final class ChapterView extends JPanel {
         // 创建滚动面板并添加编辑器
         scroll = new JBScrollPane(editor);
         scroll.setBorder(JBUI.Borders.empty());
+        scroll.setWheelScrollingEnabled(true);
+        scroll.getVerticalScrollBar().setUnitIncrement(16);
+        scroll.getHorizontalScrollBar().setUnitIncrement(16);
+
+        editor.addMouseListener(new MouseAdapter() {
+            @Override
+            public void mouseClicked(MouseEvent e) {
+                if (!readMode || !shouldAdvanceOnMouseClick(e)) {
+                    return;
+                }
+                advanceReadLine();
+            }
+        });
+        editor.addMouseWheelListener(e -> {
+            if (readMode && isWheelTrigger()) {
+                if (e.getPreciseWheelRotation() > 0) {
+                    advanceReadLine();
+                }
+            } else if (!readMode) {
+                JScrollBar bar = scroll.getVerticalScrollBar();
+                if (bar != null) {
+                    bar.setValue(bar.getValue() + (int) (e.getPreciseWheelRotation() * bar.getUnitIncrement() * 3));
+                }
+            }
+        });
         // 将滚动面板添加到面板中心区域
         add(scroll, BorderLayout.CENTER);
     }
@@ -71,38 +110,141 @@ public final class ChapterView extends JPanel {
      * @param chapter 要显示的章节对象
      */
     public void showChapter(@NotNull Chapter chapter) {
-        // 获取当前设置
+        showChapter(chapter, null);
+    }
+
+    public void showChapter(@NotNull Chapter chapter, Integer targetScrollOffset) {
+        currentHtml = chapter.html;
+        readLineIndex = -1;
+        pendingScrollOffset = targetScrollOffset;
+        if (readMode) {
+            renderReadMode();
+        } else {
+            renderNormalMode();
+        }
+    }
+
+    public void setReadMode(boolean enabled) {
+        readMode = enabled;
+        if (currentHtml == null || currentHtml.isBlank()) {
+            return;
+        }
+        if (readMode) {
+            readLineIndex = 0;
+            renderReadMode();
+        } else {
+            renderNormalMode();
+        }
+    }
+
+    private void renderNormalMode() {
         IBooksSettings.State s = IBooksSettings.getInstance().getState();
-        // 获取HTML编辑器工具包
-        HTMLEditorKit kit = (HTMLEditorKit) editor.getEditorKit();
-        // 获取样式表
-        StyleSheet sheet = kit.getStyleSheet();
-        // 添加CSS规则
-        sheet.addRule(css(s));
-        // 包装HTML内容
-        String wrapped = wrap(chapter.html, s);
-        // 设置编辑器文本内容
-        editor.setText(wrapped);
-        // 将光标位置设置到开头
+        int previousScroll = pendingScrollOffset != null ? pendingScrollOffset : getScrollOffset();
+        editor.setEditorKit(new HTMLEditorKit());
+        editor.setContentType("text/html");
+        editor.setText(wrap(currentHtml, s));
         editor.setCaretPosition(0);
-        // 在事件调度线程中执行滚动条归零操作
-        SwingUtilities.invokeLater(() -> scroll.getVerticalScrollBar().setValue(0));
+        editor.revalidate();
+        editor.repaint();
+        final int restoreTo = previousScroll;
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar bar = scroll.getVerticalScrollBar();
+            if (bar != null) {
+                int max = Math.max(0, bar.getMaximum() - bar.getVisibleAmount());
+                int to = Math.max(0, Math.min(restoreTo, max));
+                bar.setValue(to);
+            }
+            scroll.getViewport().setViewPosition(new java.awt.Point(0, Math.max(0, restoreTo)));
+            scroll.revalidate();
+            scroll.repaint();
+            pendingScrollOffset = null;
+        });
+    }
+
+    public boolean isReadMode() {
+        return readMode;
+    }
+
+    private boolean shouldAdvanceOnMouseClick(MouseEvent e) {
+        String trigger = IBooksSettings.getInstance().getState().readModeTrigger;
+        if ("LEFT".equals(trigger)) {
+            return SwingUtilities.isLeftMouseButton(e);
+        }
+        if ("RIGHT".equals(trigger)) {
+            return SwingUtilities.isRightMouseButton(e);
+        }
+        return false;
+    }
+
+    private boolean isWheelTrigger() {
+        return "WHEEL".equals(IBooksSettings.getInstance().getState().readModeTrigger);
+    }
+
+    private void renderReadMode() {
+        if (currentHtml == null || currentHtml.isBlank()) {
+            return;
+        }
+        IBooksSettings.State s = IBooksSettings.getInstance().getState();
+        List<String> lines = splitReadLines(extractReadableText(currentHtml), Math.max(18, Math.min(36, 28 + (s.fontSize - 14))));
+        if (lines.isEmpty()) {
+            editor.setText("");
+            return;
+        }
+        if (readLineIndex < 0 || readLineIndex >= lines.size()) {
+            readLineIndex = 0;
+        }
+
+        readLines.clear();
+        readLines.addAll(lines);
+
+        editor.setEditorKit(new javax.swing.text.StyledEditorKit());
+        editor.setContentType("text/plain");
+        editor.setEditable(false);
+        editor.setBackground(themeBackground(s.theme));
+        editor.setForeground(themeForeground(s.theme));
+
+        DefaultStyledDocument doc = new DefaultStyledDocument();
+        SimpleAttributeSet base = new SimpleAttributeSet();
+        StyleConstants.setFontFamily(base, s.fontFamily);
+        StyleConstants.setFontSize(base, s.fontSize);
+        StyleConstants.setForeground(base, themeForeground(s.theme));
+        StyleConstants.setBackground(base, themeBackground(s.theme));
+        StyleConstants.setAlignment(base, StyleConstants.ALIGN_LEFT);
+
+        String currentLine = readLines.get(readLineIndex);
+        try {
+            doc.insertString(0, currentLine, base);
+        } catch (BadLocationException ignored) {
+            return;
+        }
+
+        SimpleAttributeSet highlight = new SimpleAttributeSet(base);
+        StyleConstants.setBackground(highlight, new java.awt.Color(0xDDE9FF));
+        StyleConstants.setForeground(highlight, new java.awt.Color(0x1A1F2B));
+        StyleConstants.setBold(highlight, true);
+        doc.setCharacterAttributes(0, currentLine.length(), highlight, false);
+
+        editor.setDocument(doc);
+        editor.setCaretPosition(0);
+        SwingUtilities.invokeLater(() -> editor.scrollRectToVisible(new java.awt.Rectangle(0, 0, 1, 1)));
+    }
+
+    private void advanceReadLine() {
+        if (!readMode || readLines.isEmpty()) {
+            return;
+        }
+        if (readLineIndex < readLines.size() - 1) {
+            readLineIndex++;
+            renderReadMode();
+            editor.requestFocusInWindow();
+        }
     }
 
     /**
      * 应用主题设置
      */
     public void applyTheme() {
-        // 获取当前设置
-        IBooksSettings.State s = IBooksSettings.getInstance().getState();
-        // 获取HTML文档
-        HTMLDocument doc = (HTMLDocument) editor.getDocument();
-        // 添加CSS规则
-        doc.getStyleSheet().addRule(css(s));
-        // 设置背景颜色
-        editor.setBackground(themeBackground(s.theme));
-        // 重绘编辑器
-        editor.repaint();
+        applyStyles();
     }
 
     /**
@@ -111,30 +253,28 @@ public final class ChapterView extends JPanel {
      */
     public void applyStyles() {
         IBooksSettings.State s = IBooksSettings.getInstance().getState();
+        final int previousScroll = getScrollOffset();
 
-        // 必须在 EDT 上操作 UI
         SwingUtilities.invokeLater(() -> {
-            HTMLEditorKit kit = (HTMLEditorKit) editor.getEditorKit();
-
-            // 1. 彻底替换 StyleSheet（避免旧 font-size 规则残留）
-            StyleSheet newSheet = new StyleSheet();
-            newSheet.addRule(css(s));
-            kit.setStyleSheet(newSheet);
-
-            // 2. 同步背景色（body 的 background 有时不够，再设一次组件背景）
-            editor.setBackground(themeBackground(s.theme));
-
-            // 3. 强制重新渲染（关键！只改 StyleSheet 通常不会刷新已显示内容）
-            String html = editor.getText();
-            if (html != null && !html.isBlank()) {
-                // 重新用当前设置包装一次（保证 class 和主题也一致）
-                // 注意：这里简单处理，如果 chapter 原始 html 需要保留，可缓存原始 body
-                editor.setText(html);          // 最稳妥的强制重绘方式
-                // 如果你之前保存了原始 chapter，也可以重新调用 showChapter(currentChapter)
+            if (readMode) {
+                renderReadMode();
+                return;
             }
-
+            editor.setEditorKit(new HTMLEditorKit());
+            editor.setContentType("text/html");
+            editor.setText(wrap(currentHtml, s));
+            editor.setCaretPosition(0);
+            editor.setBackground(themeBackground(s.theme));
             editor.revalidate();
             editor.repaint();
+            SwingUtilities.invokeLater(() -> {
+                JScrollBar bar = scroll.getVerticalScrollBar();
+                if (bar != null) {
+                    int max = bar.getMaximum();
+                    int value = Math.min(previousScroll, Math.max(0, max - bar.getVisibleAmount()));
+                    bar.setValue(value);
+                }
+            });
         });
     }
 
@@ -151,8 +291,27 @@ public final class ChapterView extends JPanel {
      * @param value 滚动条要设置的值
      */
     public void setScrollOffset(int value) {
-        // 在事件调度线程中执行滚动条设置
-        SwingUtilities.invokeLater(() -> scroll.getVerticalScrollBar().setValue(value));
+        setScrollOffset(value, 0);
+    }
+
+    private void setScrollOffset(int value, int attempt) {
+        if (attempt > 8) {
+            return;
+        }
+        SwingUtilities.invokeLater(() -> {
+            JScrollBar bar = scroll.getVerticalScrollBar();
+            if (bar == null) {
+                return;
+            }
+            int max = Math.max(0, bar.getMaximum() - bar.getVisibleAmount());
+            int target = Math.max(0, Math.min(value, max));
+            if (bar.getValue() != target) {
+                bar.setValue(target);
+            }
+            if (value > 0 && target == 0 && attempt < 8) {
+                setScrollOffset(value, attempt + 1);
+            }
+        });
     }
 
     /**
@@ -201,20 +360,52 @@ public final class ChapterView extends JPanel {
      */
     private static String wrap(String html, IBooksSettings.State s) {
         String body = html;
-        // 查找body标签开始位置
         int bodyStart = html.toLowerCase().indexOf("<body");
         if (bodyStart >= 0) {
-            // 查找body标签结束位置
             int gt = html.indexOf('>', bodyStart);
-            // 查找body标签结束位置
             int bodyEnd = html.toLowerCase().lastIndexOf("</body>");
             if (gt > 0 && bodyEnd > gt) {
-                // 提取body内容
                 body = html.substring(gt + 1, bodyEnd);
             }
         }
-        // 返回包装后的HTML
-        return "<html><head></head><body class='ibooks-body theme-" + s.theme + "'>" + body + "</body></html>";
+        return "<html><head><style type='text/css'>" + css(s) + "</style></head><body class='ibooks-body theme-" + s.theme + "'>" + body + "</body></html>";
+    }
+
+    private static String extractReadableText(String html) {
+        String noScripts = html.replaceAll("(?is)<script.*?</script>", " ");
+        String noStyles = noScripts.replaceAll("(?is)<style.*?</style>", " ");
+        String noTags = noStyles.replaceAll("(?is)<[^>]+>", " ");
+        String decoded = noTags.replace("&nbsp;", " ")
+                .replace("&amp;", "&")
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&apos;", "'");
+        return decoded.replace('\u00a0', ' ').replaceAll("\\s+", " ").trim();
+    }
+
+    private static List<String> splitReadLines(String text, int maxLen) {
+        List<String> lines = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        for (String part : text.split("\\s+")) {
+            if (part.isBlank()) {
+                continue;
+            }
+            if (!current.isEmpty() && current.length() + part.length() + 1 > maxLen) {
+                lines.add(current.toString().trim());
+                current = new StringBuilder(part);
+            } else {
+                if (!current.isEmpty()) {
+                    current.append(' ');
+                }
+                current.append(part);
+            }
+        }
+        if (!current.isEmpty()) {
+            lines.add(current.toString().trim());
+        }
+        return lines;
     }
 
     /**
@@ -223,17 +414,18 @@ public final class ChapterView extends JPanel {
      * @return CSS样式字符串
      */
     private static String css(IBooksSettings.State s) {
-        // 获取背景颜色
         String bg = hex(themeBackground(s.theme));
-        // 获取前景颜色
         String fg = hex(themeForeground(s.theme));
-        // 返回格式化的CSS字符串
         return """
                 body { font-family: %s; font-size: %dpx; line-height: %s; color: %s; background: %s; margin: 0; padding: 20px 24px 48px; }
-                h1,h2,h3 { line-height: 1.25; }
+                h1, h2, h3 { line-height: 1.25; font-weight: 700; margin: 0 0 12px 0; }
+                h1 { font-size: %.1fem; }
+                h2 { font-size: 1.35em; }
+                h3 { font-size: 1.2em; }
+                p { margin: 0 0 0.9em 0; }
                 img { max-width: 100%%; }
                 a { color: inherit; }
-                """.formatted(s.fontFamily, s.fontSize, s.lineHeight, fg, bg);
+                """.formatted(s.fontFamily, s.fontSize, s.lineHeight, fg, bg, s.fontSize / 12.0 + 0.6);
     }
 
     /**

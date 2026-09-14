@@ -24,6 +24,7 @@ public final class IBooksSettingsPanel {
             "serif",
             "sans-serif"
     });
+    private final ComboBox<String> readModeTrigger = new ComboBox<>(new String[]{"LEFT", "RIGHT", "WHEEL"});
     private final JBCheckBox restore = new JBCheckBox(IBooksBundle.message("settings.restore"));
 
     public IBooksSettingsPanel() {
@@ -34,6 +35,7 @@ public final class IBooksSettingsPanel {
                 .addLabeledComponent(new JBLabel(IBooksBundle.message("settings.maxWidth")), maxWidth, 1, false)
                 .addLabeledComponent(new JBLabel(IBooksBundle.message("settings.theme")), theme, 1, false)
                 .addLabeledComponent(new JBLabel(IBooksBundle.message("settings.fontFamily")), fontFamily, 1, false)
+                .addLabeledComponent(new JBLabel(IBooksBundle.message("settings.readModeTrigger")), readModeTrigger, 1, false)
                 .addComponent(restore, 8)
                 .addComponentFillVertically(new JPanel(), 0)
                 .getPanel();
@@ -50,6 +52,8 @@ public final class IBooksSettingsPanel {
         maxWidth.setValue(state.maxWidth);
         theme.setSelectedItem(state.theme);
         fontFamily.setSelectedItem(state.fontFamily);
+        String trigger = state.readModeTrigger == null || state.readModeTrigger.isBlank() ? "LEFT" : state.readModeTrigger;
+        readModeTrigger.setSelectedItem(trigger);
         restore.setSelected(state.restoreLastBook);
     }
 
@@ -59,15 +63,19 @@ public final class IBooksSettingsPanel {
         state.maxWidth = (Integer) maxWidth.getValue();
         state.theme = String.valueOf(theme.getSelectedItem());
         state.fontFamily = String.valueOf(fontFamily.getSelectedItem());
+        state.readModeTrigger = String.valueOf(readModeTrigger.getSelectedItem());
         state.restoreLastBook = restore.isSelected();
     }
 
     public boolean isModified(IBooksSettings.State state) {
+        String currentTrigger = state.readModeTrigger == null || state.readModeTrigger.isBlank() ? "LEFT" : state.readModeTrigger;
+        String selectedTrigger = String.valueOf(readModeTrigger.getSelectedItem());
         return state.fontSize != (Integer) fontSize.getValue()
                 || Math.abs(state.lineHeight - ((Number) lineHeight.getValue()).doubleValue()) > 0.01
                 || state.maxWidth != (Integer) maxWidth.getValue()
                 || !state.theme.equals(theme.getSelectedItem())
                 || !state.fontFamily.equals(fontFamily.getSelectedItem())
+                || !currentTrigger.equals(selectedTrigger)
                 || state.restoreLastBook != restore.isSelected();
     }
 }

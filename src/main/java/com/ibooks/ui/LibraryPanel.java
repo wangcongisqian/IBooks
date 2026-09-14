@@ -11,6 +11,7 @@ import org.jetbrains.annotations.Nullable;
 
 import javax.swing.DefaultListCellRenderer;
 import javax.swing.DefaultListModel;
+import javax.swing.JButton;
 import javax.swing.JList;
 import javax.swing.JPanel;
 import javax.swing.ListSelectionModel;
@@ -29,11 +30,14 @@ public final class LibraryPanel extends JPanel {
         list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
         list.setEmptyText(IBooksBundle.message("library.empty"));
         list.setCellRenderer(new BookRenderer());
-        list.addListSelectionListener(e -> {
-            if (!e.getValueIsAdjusting()) {
-                LibraryBook book = list.getSelectedValue();
-                if (book != null && book.path != null) {
-                    openHandler.accept(Path.of(book.path));
+        list.addMouseListener(new java.awt.event.MouseAdapter() {
+            @Override
+            public void mouseClicked(java.awt.event.MouseEvent e) {
+                if (e.getButton() == java.awt.event.MouseEvent.BUTTON1 && e.getClickCount() >= 2) {
+                    LibraryBook book = list.getSelectedValue();
+                    if (book != null && book.path != null) {
+                        openHandler.accept(Path.of(book.path));
+                    }
                 }
             }
         });
@@ -41,15 +45,28 @@ public final class LibraryPanel extends JPanel {
         list.getActionMap().put("remove", new javax.swing.AbstractAction() {
             @Override
             public void actionPerformed(java.awt.event.ActionEvent e) {
-                LibraryBook book = list.getSelectedValue();
-                if (book != null) {
-                    removeHandler.accept(book.id);
-                    reload();
-                }
+                removeSelectedBook(removeHandler);
             }
         });
+
+        JButton removeButton = new JButton(IBooksBundle.message("library.remove"));
+        removeButton.addActionListener(e -> removeSelectedBook(removeHandler));
+
+        JPanel footer = new JPanel(new BorderLayout());
+        footer.setBorder(JBUI.Borders.empty(6, 8));
+        footer.add(removeButton, BorderLayout.EAST);
+
         add(new JBScrollPane(list), BorderLayout.CENTER);
+        add(footer, BorderLayout.SOUTH);
         reload();
+    }
+
+    private void removeSelectedBook(Consumer<String> removeHandler) {
+        LibraryBook book = list.getSelectedValue();
+        if (book != null) {
+            removeHandler.accept(book.id);
+            reload();
+        }
     }
 
     public void reload() {

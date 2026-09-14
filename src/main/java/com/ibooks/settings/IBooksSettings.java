@@ -18,6 +18,7 @@ public final class IBooksSettings implements PersistentStateComponent<IBooksSett
         public String theme = "paper";
         public String fontFamily = "Georgia, 'Times New Roman', serif";
         public boolean restoreLastBook = true;
+        public String readModeTrigger = "LEFT";
     }
 
     private final State state = new State();
@@ -48,6 +49,13 @@ public final class IBooksSettings implements PersistentStateComponent<IBooksSett
         }
         if (state.theme == null || state.theme.isBlank()) {
             state.theme = "paper";
+        }
+        if (state.readModeTrigger == null || state.readModeTrigger.isBlank()) {
+            state.readModeTrigger = "LEFT";
+        }
+        switch (state.readModeTrigger) {
+            case "LEFT", "RIGHT", "WHEEL" -> {}
+            default -> state.readModeTrigger = "LEFT";
         }
     }
 

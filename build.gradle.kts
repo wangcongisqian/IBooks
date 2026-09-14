@@ -39,6 +39,7 @@ dependencies {
     implementation("commons-io:commons-io:2.16.1")
     implementation("org.apache.commons:commons-lang3:3.17.0")
     implementation("net.sourceforge.htmlcleaner:htmlcleaner:2.29")
+    implementation("org.apache.pdfbox:pdfbox:3.0.3")
 
     intellijPlatform {
         create(
