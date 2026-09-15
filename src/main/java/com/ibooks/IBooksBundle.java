@@ -19,4 +19,5 @@ public final class IBooksBundle extends DynamicBundle {
                                       Object @NotNull ... params) {
         return INSTANCE.getMessage(key, params);
     }
+
 }
